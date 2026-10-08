@@ -6,7 +6,16 @@ en el propio iPhone.
 
 ## Cómo abrirla
 
-**Por ahora (con la computadora como «servidor»):**
+**En internet (recomendado):** abre en Safari
+
+**https://alphacoresolution.github.io/detector-reacciones-app/**
+
+y toca **Compartir → Agregar a inicio**. Funciona desde cualquier lugar, sin computadora y sin
+certificados; después de abrirla una vez, el ícono abre incluso sin internet. El código está
+publicado en https://github.com/alphacoresolution/detector-reacciones-app. Para subir cambios,
+usa `publicar.bat` en la carpeta `celular`.
+
+**Desde la computadora (sin internet):**
 1. En la computadora, abre el Detector y presiona **App del celular**. Aparece un código QR.
 2. Con el iPhone en el mismo Wi-Fi, escanea el código o escribe en Safari solo la dirección IP de la
    computadora (por ejemplo `10.0.0.105`): salta sola a la app. Si escribes la dirección completa,
