@@ -1,0 +1,3 @@
+Esta carpeta contiene MediaPipe Tasks Vision 1.1.0 (@mediapipe/tasks-vision), de Google LLC.
+Licencia: Apache License 2.0 — https://www.apache.org/licenses/LICENSE-2.0
+Los modelos face_landmarker.task y hand_landmarker.task (carpeta modelos) son de MediaPipe, misma licencia.
