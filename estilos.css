@@ -95,9 +95,12 @@ textarea { width: 100%; background: var(--campo); color: var(--tinta); border: 1
 
 /* ---------- pupila de cerca: pantalla oscura para que la luz del celular no mueva la pupila ---------- */
 body.cerca { background: #000; }
-body.cerca .visor { opacity: 0.001; }
-body.cerca .visor video, body.cerca .visor canvas { opacity: 0.001; }
+body.cerca .visor { background: #000; }
+body.cerca .visor video { opacity: 0.001; }          /* el video se apaga: su luz moveria la pupila */
+body.cerca .visor canvas { opacity: 1; }             /* solo el contorno tenue de la cara */
 body.cerca #resultados, body.cerca .chips-video, body.cerca .eventos { visibility: hidden; }
+.aviso-oscuro { position: absolute; left: 12px; right: 12px; top: 12px; color: #8a8a8a; font-size: 14px; font-weight: 600; text-align: center; line-height: 1.35; }
+.aviso-oscuro small { font-weight: 400; color: #666; }
 body.cerca .protocolo { background: #000; border-color: #1a1a1a; }
 body.cerca .pregunta, body.cerca .texto-protocolo, body.cerca .pastilla { color: #8a8a8a; }
 body.cerca .pastilla, body.cerca .respuestas button, body.cerca .botones button { background: #0d0d0d; border-color: #1f1f1f; color: #9a9a9a; }

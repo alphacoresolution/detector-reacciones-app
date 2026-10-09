@@ -164,10 +164,42 @@ async function empezar() {
   mostrar("sesion");
   estadoCarga("");
   try { S.bloqueo = await navigator.wakeLock?.request("screen"); } catch (e) {}
+  vigilarCamara();
   siguienteCuadro();
 }
 
+function vigilarCamara() {
+  const video = $("video");
+  S.ultimoCuadroVideo = performance.now();
+  clearInterval(S.vigilante);
+  S.vigilante = setInterval(async () => {
+    if (!S.activo) { clearInterval(S.vigilante); return; }
+    const pista = S.flujo?.getVideoTracks?.()[0];
+    const muerta = !pista || pista.readyState === "ended" || pista.muted;
+    const congelada = performance.now() - S.ultimoCuadroVideo > 3000 && document.visibilityState === "visible";
+    if (!muerta && video.paused) { try { await video.play(); } catch (e) {} return; }
+    if ((muerta || congelada) && !S.reabriendo) {
+      S.reabriendo = true;
+      try {
+        const [w, h] = pref.calidad.split("x").map(Number);
+        const nuevo = await navigator.mediaDevices.getUserMedia({ audio: false,
+          video: { facingMode: { ideal: pref.camara }, width: { ideal: w }, height: { ideal: h }, frameRate: { ideal: 30 } } });
+        try { S.flujo?.getTracks().forEach(p => p.stop()); } catch (e) {}
+        S.flujo = nuevo;
+        video.srcObject = nuevo;
+        await video.play();
+        S.ultimoCuadroVideo = performance.now();
+        avisar("Se reabrió la cámara");
+      } catch (e) {
+        avisar("La cámara se cerró y no se pudo reabrir");
+      }
+      S.reabriendo = false;
+    }
+  }, 2000);
+}
+
 function detenerMedios() {
+  clearInterval(S.vigilante);
   try { S.flujo?.getTracks().forEach(p => p.stop()); } catch (e) {}
   try { S.voz?.detener(); } catch (e) {}
   try { S.transcriptor?.detener(); } catch (e) {}
@@ -184,6 +216,7 @@ function siguienteCuadro() {
 
 function analizarCuadro() {
   if (!S.activo) return;
+  S.ultimoCuadroVideo = performance.now();
   const t = reloj();
   const video = $("video");
   const inicio = performance.now();
@@ -242,7 +275,7 @@ function decir(texto) {
     const u = new SpeechSynthesisUtterance(texto);
     u.lang = "es-MX";
     u.rate = 1;
-    u.onend = u.onerror = () => resolver();
+    u.onend = u.onerror = () => { $("video").play().catch(() => {}); resolver(); };
     speechSynthesis.cancel();
     speechSynthesis.speak(u);
     setTimeout(resolver, 8000);   // por si el sistema no avisa al terminar
@@ -263,6 +296,7 @@ function acercamiento() {
 function activarCerca(activo) {
   S.cercaActiva = activo;
   document.body.classList.toggle("cerca", activo);
+  $("aviso-oscuro").hidden = !activo;
 }
 
 async function hacerPregunta() {
@@ -362,6 +396,16 @@ function dibujarCapa(r) {
   if (capa.width !== ancho || capa.height !== alto) { capa.width = ancho; capa.height = alto; }
   const c = capa.getContext("2d");
   c.clearRect(0, 0, ancho, alto);
+  if (S.cercaActiva) {
+    if (r) {
+      c.lineWidth = 2; c.strokeStyle = "rgba(140,140,140,.55)";
+      c.beginPath();
+      OVALO.forEach((i, j) => { const x = r.puntos[2 * i] * k, y = r.puntos[2 * i + 1] * k; j ? c.lineTo(x, y) : c.moveTo(x, y); });
+      c.closePath(); c.stroke();
+      for (const o of r.ojos) { const [cx, cy] = o.centroFino || o.centro; c.beginPath(); c.arc(cx * k, cy * k, o.rIris * k, 0, 2 * Math.PI); c.stroke(); }
+    }
+    return;
+  }
   if (r) {
     c.lineWidth = 1.5;
     c.strokeStyle = "rgba(76,201,240,.75)";
