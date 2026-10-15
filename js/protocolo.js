@@ -39,16 +39,52 @@ export const METRICAS = {
   brillo:     { nombre: "Voz: brillo", post: [0, 8], pre: null, agg: "media", peso: 0.03, signo: 1, piso: 1.0 },
 };
 export function calidadTexto(n) { return n === null || n === undefined ? "sin datos" : n >= 0.75 ? "buena" : n >= 0.45 ? "regular" : "baja"; }
-export function confianzaCit(sep) { return sep >= 1 ? "alta" : sep >= 0.5 ? "media" : "sin evidencia suficiente"; }
+// Test de Informacion Oculta: confianza calibrada (igual que la computadora). Estadistico = (media de la opcion
+// que mas reacciono - media de las demas) / su error; los umbrales salen de simular "ninguna opcion es especial":
+// "alta" solo le sale por azar a 5 de cada 100 grupos, "media" a 20 de cada 100.
+export function estadisticoCit(x) {         // x: rondas x opciones
+  const R = x.length, k = x[0].length;
+  const medias = Array.from({ length: k }, (_, j) => x.reduce((s, f) => s + f[j], 0) / R);
+  let top = 0; for (let j = 1; j < k; j++) if (medias[j] > medias[top]) top = j;
+  let suma = 0, ss = 0, n = 0;
+  for (const f of x) {
+    const resto = f.filter((_, j) => j !== top), m = resto.reduce((s, v) => s + v, 0) / resto.length;
+    for (const v of resto) { ss += (v - m) ** 2; suma += v; n++; }
+  }
+  const s = Math.sqrt(ss / (R * (k - 2)) + 1e-9);
+  return [(medias[top] - suma / n) / (s * Math.sqrt(1 / R + 1 / (R * (k - 1)))), top];
+}
+const UMBRALES = {};
+export function umbralesCit(k, R, n = 20000) {
+  const clave = k + "x" + R;
+  if (!UMBRALES[clave]) {
+    let a = 12345;
+    const azar = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    const normal = () => Math.sqrt(-2 * Math.log(azar() + 1e-12)) * Math.cos(2 * Math.PI * azar());
+    const ts = [];
+    for (let i = 0; i < n; i++) ts.push(estadisticoCit(Array.from({ length: R }, () => Array.from({ length: k }, normal)))[0]);
+    ts.sort((p, q) => p - q);
+    UMBRALES[clave] = [ts[Math.floor(n * 0.80)], ts[Math.floor(n * 0.95)]];
+  }
+  return UMBRALES[clave];
+}
+export function confianzaCit(est, k, R) {
+  if (k < 3 || R < 1) return "sin evidencia suficiente";
+  const [media, alta] = umbralesCit(k, R);
+  return est >= alta ? "alta" : est >= media ? "media" : "sin evidencia suficiente";
+}
 const RAPIDAS = ["pupila", "tension", "mirada", "movimiento", "parpadeo", "micro", "toques", "miradas", "boca", "asimetria", "supresion"];
 const LENTAS = ["pulso", "tono", "volumen", "arranques", "pausa", "rango_tono", "respiracion", "resp_audio", "hnr", "jitter", "shimmer", "brillo"];
 
-export function indiceDesdeZ(zs) {
+// cit = true: opcion del Test de Informacion Oculta; ahi el corazon DESACELERA ante lo que se reconoce
+// (respuesta de orientacion), asi que el pulso cuenta al bajar.
+export function indiceDesdeZ(zs, cit = false) {
   let total = 0, peso = 0;
   for (const [k, z] of Object.entries(zs)) {
     if (z === null || z === undefined || !Number.isFinite(z)) continue;
     const m = METRICAS[k];
-    const zz = m.signo === 0 ? Math.abs(z) : m.signo * z;
+    const signo = cit && k === "pulso" ? -1 : m.signo;
+    const zz = signo === 0 ? Math.abs(z) : signo * z;
     total += m.peso * Math.max(-3, Math.min(4, zz));
     peso += m.peso;
   }
@@ -244,7 +280,7 @@ export class Sesion {
     mk.zs = this.zScores(mk.t);
     const zrt = this.zTiempoRespuesta(mk);
     if (zrt !== null) mk.zs.rt = zrt;
-    mk.indice = indiceDesdeZ(mk.zs);
+    mk.indice = indiceDesdeZ(mk.zs, mk.tipo === "cit");
     if (this.voz) mk.latencia = this.voz.latencia(mk.t);
     if (this.conducta) mk.conducta = this.conducta.resumen(mk.t - 0.5, mk.t + ESPERA_MARCA);
     if (this.gestos) mk.gestos = this.gestos.resumen(mk.t - 0.5, mk.t + ESPERA_MARCA);
@@ -287,7 +323,7 @@ export class Sesion {
     // con la sesion completa, el tiempo de respuesta de cada pregunta se compara con todas las demas
     for (const mk of this.marcas) {
       const z = this.zTiempoRespuesta(mk);
-      if (z !== null) { mk.zs.rt = z; mk.indice = indiceDesdeZ(mk.zs); }
+      if (z !== null) { mk.zs.rt = z; mk.indice = indiceDesdeZ(mk.zs, mk.tipo === "cit"); }
     }
     this.duracion = t;
   }
@@ -308,9 +344,18 @@ export class Sesion {
       const todos = opciones.map(o => o.indice), m = media(todos), sd = Math.max(desviacion(todos), 2);
       for (const o of opciones) o.zGrupo = (o.indice - m) / sd;
       const orden = opciones.sort((a, b) => b.indice - a.indice);
-      const separacion = orden.length > 1 ? (orden[0].indice - orden[1].indice) / sd : 0;   // cuanto destaca la primera
+      // rondas completas (cada opcion una vez); sin numero de ronda, por orden de aparicion
+      const nombres = Object.keys(porOpcion).sort(), rondas = {}, vistos = {};
+      for (const mk of mks) {
+        const r = mk.ronda || (vistos[mk.opcion] || 0) + 1;
+        vistos[mk.opcion] = r;
+        (rondas[r] ||= {})[mk.opcion] = mk.indice;
+      }
+      const completas = Object.keys(rondas).sort((a, b) => a - b).map(r => rondas[r]).filter(c => Object.keys(c).length === nombres.length);
+      const k = nombres.length, R = completas.length;
+      const separacion = k >= 3 && R >= 1 ? estadisticoCit(completas.map(c => nombres.map(o => c[o])))[0] : 0;
       return { grupo, orden, clave: opciones.find(o => o.clave) || null, separacion, rondas: Math.max(...opciones.map(o => o.rondas)),
-        confianza: confianzaCit(separacion), nOpciones: orden.length };
+        rondasCompletas: R, confianza: confianzaCit(separacion, k, R), nOpciones: orden.length };
     });
   }
 

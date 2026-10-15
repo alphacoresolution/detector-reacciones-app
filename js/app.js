@@ -29,7 +29,7 @@ const INDICACIONES_CALIBRACION = [
 
 // ---------------------------------------------------------------- preferencias
 const PREDETERMINADAS = { modo: "auto", camara: "user", calidad: "1920x1080", preguntas: "ejemplo", transcribir: true,
-  manos: true, ocultar: false, leer: true, mias: "", respiracion: true, malla: "boca", rondas: "2", cerca: true };
+  manos: true, ocultar: false, leer: true, mias: "", respiracion: true, malla: "boca", rondas: "3", cerca: true };
 function cargarPref() {
   try { return { ...PREDETERMINADAS, ...JSON.parse(localStorage.getItem("detector-pref") || "{}") }; }
   catch (e) { return { ...PREDETERMINADAS }; }
