@@ -29,9 +29,19 @@ export const METRICAS = {
   respiracion: { nombre: "Respiración", post: [0, 12], pre: [-12, 0], agg: "media", peso: 0.06, signo: 0, piso: 1.5 },
   resp_audio: { nombre: "Inhalaciones oídas", post: [0, 10], pre: null, agg: "conteo", peso: 0.03, signo: 1, piso: 0.7 },
   boca:       { nombre: "Movimiento boca", post: [0, 5], pre: null, agg: "media", peso: 0.03, signo: 1, piso: 0.5 },
+  // Unidades de accion (gestos.js): asimetria izquierda/derecha de los gestos activos y supresion de la boca
+  asimetria:  { nombre: "Asimetría facial", post: [0, 6], pre: [-3, 0], agg: "media", peso: 0.04, signo: 1, piso: 0.02 },
+  supresion:  { nombre: "Labios apretados", post: [0, 6], pre: [-3, 0], agg: "media", peso: 0.04, signo: 1, piso: 0.03 },
+  // Calidad de la voz (eGeMAPS): con tension baja la relacion armonicos/ruido y suben jitter, shimmer y brillo
+  hnr:        { nombre: "Voz: armónicos/ruido", post: [0, 8], pre: null, agg: "media", peso: 0.04, signo: -1, piso: 1.0 },
+  jitter:     { nombre: "Voz: jitter", post: [0, 8], pre: null, agg: "media", peso: 0.03, signo: 1, piso: 0.15 },
+  shimmer:    { nombre: "Voz: shimmer", post: [0, 8], pre: null, agg: "media", peso: 0.03, signo: 1, piso: 0.5 },
+  brillo:     { nombre: "Voz: brillo", post: [0, 8], pre: null, agg: "media", peso: 0.03, signo: 1, piso: 1.0 },
 };
-const RAPIDAS = ["pupila", "tension", "mirada", "movimiento", "parpadeo", "micro", "toques", "miradas", "boca"];
-const LENTAS = ["pulso", "tono", "volumen", "arranques", "pausa", "rango_tono", "respiracion", "resp_audio"];
+export function calidadTexto(n) { return n === null || n === undefined ? "sin datos" : n >= 0.75 ? "buena" : n >= 0.45 ? "regular" : "baja"; }
+export function confianzaCit(sep) { return sep >= 1 ? "alta" : sep >= 0.5 ? "media" : "sin evidencia suficiente"; }
+const RAPIDAS = ["pupila", "tension", "mirada", "movimiento", "parpadeo", "micro", "toques", "miradas", "boca", "asimetria", "supresion"];
+const LENTAS = ["pulso", "tono", "volumen", "arranques", "pausa", "rango_tono", "respiracion", "resp_audio", "hnr", "jitter", "shimmer", "brillo"];
 
 export function indiceDesdeZ(zs) {
   let total = 0, peso = 0;
@@ -74,7 +84,8 @@ export class Sesion {
     this.titulo = titulo; this.modo = modo; this.items = items;
     this.itemActual = items.length ? 0 : null;
     this.fecha = new Date().toISOString();
-    this.series = Object.fromEntries(["pupila", "pulso", "tension", "miradaH", "miradaV", "movimiento", "luz", "respiracion", "boca", "rIris"].map(k => [k, new Serie(240)]));
+    this.series = Object.fromEntries(["pupila", "pulso", "tension", "miradaH", "miradaV", "movimiento", "luz", "respiracion", "boca", "rIris", "asimetria", "supresion"].map(k => [k, new Serie(240)]));
+    this.gestos = null;
     this.conteos = {};
     this.base = null; this.baseInicio = null;
     this.baseVerbal = null;
@@ -89,7 +100,8 @@ export class Sesion {
     if (t - this.ultimaFila >= 0.25) {
       this.ultimaFila = t;
       this.filas.push({ t: Math.round(t * 100) / 100, pupila: v.pupilaMm ?? null, pulso: v.pulso ?? null, tono: v.tono ?? null,
-        tension: v.tension ?? null, indice: v.indice ?? null, respiracion: v.respiracion ?? null, boca: v.boca ?? null });
+        tension: v.tension ?? null, indice: v.indice ?? null, respiracion: v.respiracion ?? null, boca: v.boca ?? null,
+        asimetria: v.asim ?? null, hnr: v.hnr ?? null });
     }
   }
 
@@ -99,6 +111,7 @@ export class Sesion {
   serieDe(clave) {
     if (clave === "tono" || clave === "var_tono") return this.voz?.f0;
     if (clave === "volumen") return this.voz?.volumen;
+    if (["hnr", "jitter", "shimmer", "brillo"].includes(clave)) return this.voz?.[clave];
     return this.series[clave];
   }
 
@@ -201,7 +214,7 @@ export class Sesion {
     const mk = { n: this.marcas.length + 1, t, texto: item ? item.texto : `Pregunta ${this.marcas.length + 1}`,
       tipo: item ? item.tipo : "pregunta", grupo: item?.grupo || null, opcion: item?.opcion || null, clave: !!item?.clave,
       estado: "midiendo", indice: null, zs: {}, etiqueta: null, latencia: null, conducta: [], verbal: null, avisoLuz: false,
-      rt: null, respuesta: null, ronda: item?.ronda || null, cerca: !!item?.cerca, acercamiento: null };
+      rt: null, respuesta: null, ronda: item?.ronda || null, cerca: !!item?.cerca, acercamiento: null, calidad: {}, gestos: [] };
     if (acercamiento) mk.acercamiento = acercamiento;     // cuantas veces mas grande se veia el iris que en reposo
     this.marcas.push(mk);
     return mk;
@@ -234,6 +247,7 @@ export class Sesion {
     mk.indice = indiceDesdeZ(mk.zs);
     if (this.voz) mk.latencia = this.voz.latencia(mk.t);
     if (this.conducta) mk.conducta = this.conducta.resumen(mk.t - 0.5, mk.t + ESPERA_MARCA);
+    if (this.gestos) mk.gestos = this.gestos.resumen(mk.t - 0.5, mk.t + ESPERA_MARCA);
     if (this.base?.luz) {
       const [, luz] = this.series.luz.ventana(mk.t, mk.t + 5);
       if (luz.length && Math.abs(media(luz) - this.base.luz) / this.base.luz > 0.12) mk.avisoLuz = true;
@@ -247,7 +261,25 @@ export class Sesion {
       const base = this.baseVerbal ? { ...this.baseVerbal, latencia: neutras.length ? mediana(neutras) : null } : null;
       mk.verbal = analizarHabla(texto, { pregunta: mk.texto, base, latencia: mk.latencia, segundosHabla: this.segundosHablados(mk.t, fin) });
     }
+    mk.calidad = this.calidad(mk);
     mk.estado = "lista";
+  }
+
+  // Calidad de la medicion de cada senal en la ventana de la pregunta (0-1): una senal con calidad baja
+  // no debe leerse como reaccion, por eso el reporte la muestra aparte del indice.
+  calidad(mk) {
+    const t = mk.t, c = {};
+    c.rostro = Math.min(1, this.series.tension.ventana(t, t + 4)[0].length / 60);
+    const np = this.series.pupila.ventana(t + 0.5, t + 4)[0].length, [, iris] = this.series.rIris.ventana(t, t + 4);
+    const rIris = iris.length ? mediana(iris) : 0;
+    c.pupila = Math.min(1, np / 35) * (rIris >= 10 ? 1 : rIris >= 7 ? 0.6 : 0.3) * (mk.avisoLuz ? 0.5 : 1);
+    c.pulso = Math.min(1, this.series.pulso.ventana(t + 2, t + 10)[0].length / 6);
+    if (this.voz) c.voz = Math.min(1, this.voz.resumenRitmo(t, t + 10).segundosVoz / 1.5);
+    const nr = this.series.respiracion.ventana(t, t + 12)[0].length;
+    if (nr || this.series.respiracion.ventana(t - 12, t)[0].length) c.respiracion = Math.min(1, nr / 6);
+    const v = Object.values(c);
+    c.global = v.length ? v.reduce((s, x) => s + x, 0) / v.length : null;
+    return c;
   }
 
   terminar(t) {
@@ -277,13 +309,15 @@ export class Sesion {
       for (const o of opciones) o.zGrupo = (o.indice - m) / sd;
       const orden = opciones.sort((a, b) => b.indice - a.indice);
       const separacion = orden.length > 1 ? (orden[0].indice - orden[1].indice) / sd : 0;   // cuanto destaca la primera
-      return { grupo, orden, clave: opciones.find(o => o.clave) || null, separacion, rondas: Math.max(...opciones.map(o => o.rondas)) };
+      return { grupo, orden, clave: opciones.find(o => o.clave) || null, separacion, rondas: Math.max(...opciones.map(o => o.rondas)),
+        confianza: confianzaCit(separacion), nOpciones: orden.length };
     });
   }
 
   aJSON() {
     return { titulo: this.titulo, modo: this.modo, fecha: this.fecha, duracion: this.duracion ?? null, base: this.base,
       baseVerbal: this.baseVerbal, baseInicio: this.baseInicio, filas: this.filas,
-      marcas: this.marcas.map(({ ...m }) => m), eventos: this.conducta ? this.conducta.eventos : [] };
+      marcas: this.marcas.map(({ ...m }) => m), eventos: this.conducta ? this.conducta.eventos : [],
+      gestos: this.gestos ? this.gestos.eventos : [] };
   }
 }

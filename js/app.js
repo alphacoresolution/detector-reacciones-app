@@ -3,6 +3,7 @@ import { AnalizadorRostro, crearManos, OVALO } from "./rostro.js";
 import { Respiracion } from "./respiracion.js";
 import { Parpadeos, Microexpresiones, DetectorConducta, CONEXIONES_MANO, PUNTAS } from "./conducta.js";
 import { AnalizadorVoz } from "./voz.js";
+import { AnalizadorGestos } from "./gestos.js";
 import { Transcriptor } from "./habla.js";
 import { Sesion, expandirPreguntas, nivelTexto, DURACION_BASE, ESPERA_MARCA } from "./protocolo.js";
 import { posRppg, mediana } from "./senales.js";
@@ -148,8 +149,10 @@ async function empezar() {
     [titulo, items] = (() => { const p = pref.preguntas; pref.preguntas = "ejemplo"; const r = preguntasElegidas(); pref.preguntas = p; return r; })();
   }
   S.sesion = new Sesion({ titulo, items, modo: pref.modo === "auto" ? "Celular · automático" : "Celular · con entrevistador" });
-  S.parpadeos = new Parpadeos(); S.micro = new Microexpresiones(); S.conducta = new DetectorConducta();
-  Object.assign(S.sesion, { voz: S.voz, transcriptor: S.transcriptor, conducta: S.conducta });
+  S.parpadeos = new Parpadeos(); S.micro = new Microexpresiones(); S.conducta = new DetectorConducta(false);
+  S.gestos = new AnalizadorGestos();
+  Object.assign(S.sesion, { voz: S.voz, transcriptor: S.transcriptor, conducta: S.conducta, gestos: S.gestos });
+  S.sesion.series.asimetria = S.gestos.asimetria; S.sesion.series.supresion = S.gestos.supresion;
   S.sesion.conteos = { parpadeo: S.parpadeos.eventos, micro: S.micro.eventos, toques: S.conducta.series.toque, miradas: S.conducta.series.mirada,
     resp_audio: S.voz.respiraciones };
   Object.assign(S, { piel: [], pulsos: [], bpm: null, tRppg: 0, listaManos: [], cuadros: 0, tiempos: [], ultimaUI: 0,
@@ -237,6 +240,9 @@ function analizarCuadro() {
   if (r) {
     S.parpadeos.actualizar(r.ear, t, r.parpadeoRed);
     micro = S.micro.actualizar(r.gestos, t);
+    for (const ev of S.gestos.actualizar(r.gestos, t)) {
+      if (ev.pico >= 0.3 || ev.clase === "micro") S.conducta.eventoExterno(ev.t, "au", ev.texto + (ev.clase === "micro" ? " (micro)" : ""), ev.duracion);
+    }
     if (r.pielRgb) S.piel.push([t, ...r.pielRgb]);
   }
   S.conducta.actualizar(t, r, S.listaManos, micro);
@@ -255,7 +261,8 @@ function analizarCuadro() {
   const valores = { pupila: r?.pupilaMm ?? null, pupilaMm: r?.pupilaMm ?? null, pulso: S.bpm, tension: r?.tension ?? null,
     miradaH: r?.miradaH ?? null, miradaV: r?.miradaV ?? null, movimiento: r?.movimiento ?? null, luz: r?.luz ?? null,
     tono: tf !== null && t - tf < 0.1 ? S.voz.f0.ultimo() : null, indice: S.indice, rIris: r?.rIris ?? null,
-    respiracion: S.respiracion ? S.respiracion.rpm : null, boca: r?.boca ?? null };
+    respiracion: S.respiracion ? S.respiracion.rpm : null, boca: r?.boca ?? null,
+    asim: r ? S.gestos.asimetria.ultimo() : null, hnr: tf !== null && t - tf < 0.1 ? S.voz.hnr.ultimo() : null };
   S.sesion.registrar(t, valores);
   S.sesion.actualizar(t);
   if (t - (S.tIndice || 0) > 0.5) { S.tIndice = t; [S.indice, S.zs] = S.sesion.indiceEnVivo(t); }
@@ -475,6 +482,10 @@ function actualizarPantalla(t, r) {
   $("m-mirada").textContent = r ? S.conducta.miradaActual.replace(/^./, c => c.toUpperCase()) : "--";
   $("m-toques").textContent = S.manos ? S.conducta.contar("toque") : "apagado";
   $("m-micro").textContent = S.conducta.contar("micro");
+  const asim = S.gestos.asimetria.ultimo();
+  $("m-asimetria").textContent = r && asim !== null ? asim.toFixed(2) : "--";
+  const hnr = S.voz.hnr.ultimo(), th = S.voz.hnr.tUltimo();
+  $("m-hnr").textContent = hnr !== null && th !== null && t - th < 2 ? `${Math.round(hnr)} dB` : "--";
   $("m-resp").textContent = S.respiracion ? (S.respiracion.rpm ? `${Math.round(S.respiracion.rpm)}/min` : "midiendo…") : "apagada";
   $("m-boca").textContent = r && r.boca !== null && r.boca !== undefined ? r.boca.toFixed(2) : "--";
   const rit = S.voz.resumenRitmo(t - 20, t);

@@ -3,12 +3,51 @@ import { Serie, f0Yin, percentil } from "./senales.js";
 
 const FS = 16000, SALTO = 640, VENTANA = 1024;
 
+// Picos de cada ciclo de la voz (uno por periodo de ~tau muestras)
+function marcasDePeriodo(x, tau) {
+  tau = Math.round(tau);
+  if (tau < 8 || x.length < 3 * tau) return [];
+  let i = 0; for (let k = 1; k < tau; k++) if (x[k] > x[i]) i = k;
+  const picos = [i];
+  for (;;) {
+    const a = i + Math.floor(0.8 * tau), b = i + Math.floor(1.25 * tau) + 1;
+    if (b > x.length) break;
+    let j = a; for (let k = a; k < b; k++) if (x[k] > x[j]) j = k;
+    i = j; picos.push(i);
+  }
+  return picos;
+}
+
+// Jitter (%), shimmer (%) y HNR (dB, Boersma 1993) de una ventana con voz (conjunto eGeMAPS).
+export function calidadVoz(x, f0, fs = FS) {
+  if (!f0) return [null, null, null];
+  const picos = marcasDePeriodo(x, fs / f0);
+  let jitter = null, shimmer = null;
+  if (picos.length >= 5) {
+    const per = [], amp = [];
+    for (let k = 1; k < picos.length; k++) { per.push(picos[k] - picos[k - 1]); amp.push(Math.abs(x[picos[k]]) + 1e-9); }
+    const mp = per.reduce((s, v) => s + v, 0) / per.length, ma = amp.reduce((s, v) => s + v, 0) / amp.length;
+    let dp = 0, da = 0;
+    for (let k = 1; k < per.length; k++) { dp += Math.abs(per[k] - per[k - 1]); da += Math.abs(amp[k] - amp[k - 1]); }
+    jitter = dp / (per.length - 1) / mp * 100; shimmer = da / (amp.length - 1) / ma * 100;
+  }
+  const tau = Math.round(fs / f0);
+  let m = 0; for (let k = 0; k < x.length; k++) m += x[k]; m /= x.length;
+  let e0 = 1e-12, r = 0;
+  for (let k = 0; k < x.length; k++) e0 += (x[k] - m) ** 2;
+  for (let k = 0; k + tau < x.length; k++) r += (x[k] - m) * (x[k + tau] - m);
+  r = Math.min(0.9999, Math.max(1e-4, r / e0));
+  return [jitter, shimmer, 10 * Math.log10(r / (1 - r))];
+}
+
 export class AnalizadorVoz {
   constructor() {
     this.f0 = new Serie(300); this.volumen = new Serie(300); this.voz = new Serie(300);
     this.nivel = new Serie(30); this.microvariacion = new Serie(300);
     // ritmo del habla (eGeMAPS): arranques de voz, pausas; e inhalaciones audibles entre frases
     this.arranques = new Serie(900); this.pausas = new Serie(900); this.respiraciones = new Serie(900);
+    // calidad de la voz: jitter %, shimmer %, HNR dB y brillo dB (energia arriba de 1 kHz frente a abajo)
+    this.jitter = new Serie(300); this.shimmer = new Serie(300); this.hnr = new Serie(300); this.brillo = new Serie(300);
     this.tramoDesde = null; this.silencioDesde = null; this.ePrev = [];
     this.buffer = new Float32Array(VENTANA);
     this.pendiente = [];
@@ -81,7 +120,18 @@ export class AnalizadorVoz {
       this.volumen.agregar(db, t);
       if (this.f0Previo) this.microvariacion.agregar(Math.abs(f0 - this.f0Previo) / this.f0Previo * 100, t);
       this.f0Previo = f0;
+      this.calidad(f0, aper, t);
     } else this.f0Previo = null;
+  }
+
+  calidad(f0, aper, t) {
+    const [jit, shim, hnr] = calidadVoz(this.buffer, f0);
+    if (hnr !== null) this.hnr.agregar(hnr, t);
+    if (aper < 0.12 && jit !== null) { this.jitter.agregar(jit, t); this.shimmer.agregar(shim, t); }
+    let lp = 0, bajas = 0, altas = 0;
+    const a = Math.exp(-2 * Math.PI * 1000 / FS);
+    for (let i = 0; i < VENTANA; i++) { lp = a * lp + (1 - a) * this.buffer[i]; const hp = this.buffer[i] - lp; bajas += lp * lp; altas += hp * hp; }
+    this.brillo.agregar(10 * Math.log10((altas + 1e-12) / (bajas + 1e-12)), t);
   }
 
   ritmo(hablando, t) {
@@ -119,7 +169,8 @@ export class AnalizadorVoz {
   resumenRitmo(t0, t1) {
     const [, v] = this.voz.ventana(t0, t1);
     const segundosVoz = v.reduce((s, x) => s + x, 0) * SALTO / FS;
-    const [ta] = this.arranques.ventana(t0, t1), [, p] = this.pausas.ventana(t0, t1), [, f] = this.f0.ventana(t0, t1);
+    const [ta] = this.arranques.ventana(t0, t1), [tp, p0] = this.pausas.ventana(t0, t1), [, f] = this.f0.ventana(t0, t1);
+    const p = p0.filter((x, i) => tp[i] - x >= t0 - 0.5);     // solo pausas que empezaron dentro de la ventana
     let rango = null;
     if (f.length >= 10) rango = 12 * Math.log2(percentil(f, 90) / percentil(f, 10));   // semitonos: no depende de la voz de cada quien
     return { segundosVoz, arranquesS: segundosVoz > 0.8 ? ta.length / segundosVoz : null, pausas: p.length,

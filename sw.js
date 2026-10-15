@@ -1,12 +1,12 @@
 // Guarda la app en el telefono para que abra sin internet despues de la primera vez.
-const VERSION = "detector-v1";
+const VERSION = "detector-v2";
 const ARCHIVOS = [
   "./", "index.html", "estilos.css", "manifest.webmanifest",
   "js/app.js", "js/rostro.js", "js/ojo.js", "js/senales.js", "js/conducta.js", "js/voz.js", "js/habla.js",
-  "js/protocolo.js", "js/reporte.js", "js/almacen.js",
+  "js/protocolo.js", "js/reporte.js", "js/almacen.js", "js/gestos.js", "js/respiracion.js",
   "vendor/vision_bundle.mjs", "vendor/wasm/vision_wasm_internal.js", "vendor/wasm/vision_wasm_internal.wasm",
   "vendor/wasm/vision_wasm_nosimd_internal.js", "vendor/wasm/vision_wasm_nosimd_internal.wasm",
-  "modelos/face_landmarker.task", "modelos/hand_landmarker.task",
+  "modelos/face_landmarker.task", "modelos/hand_landmarker.task", "modelos/pose_landmarker_lite.task",
   "iconos/icono-180.png", "iconos/icono-192.png", "iconos/icono-512.png",
 ];
 self.addEventListener("install", (e) => {

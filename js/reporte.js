@@ -1,5 +1,6 @@
 // Reporte de la sesion (a partir de los datos guardados): dentro de la app y como archivo para compartir.
-import { METRICAS, nivelTexto, DURACION_BASE, ESPERA_MARCA, Sesion } from "./protocolo.js";
+import { METRICAS, nivelTexto, DURACION_BASE, ESPERA_MARCA, Sesion, calidadTexto } from "./protocolo.js";
+import { tablaGestos } from "./gestos.js";
 
 // Agrupa las preguntas del Test de Informacion Oculta (misma logica que Sesion.resultadosCit, sobre datos guardados)
 function resultadosCit(marcas) { return Sesion.prototype.resultadosCit.call({ marcas }); }
@@ -87,16 +88,63 @@ function tarjetaPregunta(mk) {
     ${barras ? `<div class="zs">${barras}</div>` : ""}${conducta}${dicho}</div>`;
 }
 
+function seccionResultados(d, listas, cit) {
+  const altas = listas.filter(m => m.indice >= 78).sort((a, b) => b.indice - a.indice).slice(0, 3);
+  const neutras = listas.filter(m => m.tipo === "neutral"), otras = listas.filter(m => m.tipo !== "neutral");
+  const prom = (l) => Math.round(l.reduce((s, m) => s + m.indice, 0) / l.length);
+  let reaccion = listas.length ? `<p>${altas.length ? `<b>${altas.length}</b> de ${listas.length} preguntas con reacción alta.` : "Ninguna pregunta llegó a reacción alta."}${neutras.length && otras.length ? ` Promedio en neutrales <b>${prom(neutras)}</b>, en las demás <b>${prom(otras)}</b>.` : ""}</p>` : "<p>No hubo preguntas analizadas.</p>";
+  if (altas.length) reaccion += "<ul>" + altas.map(m => {
+    const top = Object.entries(m.zs || {}).filter(([, z]) => z !== null && Number.isFinite(z)).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 3);
+    return `<li>#${m.n} ${e(m.texto.slice(0, 60))}: <b>${Math.round(m.indice)}</b> · ${top.map(([k, z]) => `${METRICAS[k]?.nombre || k} ${z >= 0 ? "+" : ""}${z.toFixed(1)}`).join(", ")}</li>`; }).join("") + "</ul>";
+  reaccion += '<div class="sub">Reacción = el cuerpo cambió respecto al reposo de esta persona. No dice por qué.</div>';
+  let recon = cit.length ? "<ul>" + cit.map(r => {
+    const top = r.orden[0];
+    if (r.confianza === "sin evidencia suficiente") return `<li><b>${e(r.grupo)}:</b> <span class="tag">sin evidencia suficiente</span> ninguna opción destacó con claridad (la mayor fue «${e(top.opcion)}»).</li>`;
+    return `<li><b>${e(r.grupo)}:</b> «${e(top.opcion)}» destacó · confianza <span class="tag">${r.confianza}</span>${r.rondas > 1 ? ` · ${r.rondas} rondas` : ""}${r.clave ? (r.clave.opcion === top.opcion ? " · coincide con la clave" : " · <b>no</b> coincide con la clave") : ""}</li>`;
+  }).join("") + '</ul><div class="sub">Reconocimiento = una opción produjo más reacción que las demás del mismo grupo, de forma repetible. Al azar se acierta 1 de cada N.</div>'
+    : "<p>No se usaron grupos de opciones: el reconocimiento solo se evalúa con el Test de Información Oculta.</p>";
+  const nombres = { rostro: "Rostro", pupila: "Pupila", pulso: "Pulso", voz: "Voz", respiracion: "Respiración" };
+  const promC = {};
+  for (const s of Object.keys(nombres)) {
+    const v = d.marcas.map(m => m.calidad?.[s]).filter(x => x !== null && x !== undefined);
+    if (v.length) promC[s] = v.reduce((a, b) => a + b, 0) / v.length;
+  }
+  const avisos = [];
+  const luz = d.marcas.filter(m => m.avisoLuz).length;
+  if (luz) avisos.push(`la luz cambió en ${luz} pregunta(s): la pupila de esas preguntas vale menos`);
+  if (promC.pupila !== undefined && promC.pupila < 0.45) avisos.push("el ojo se vio pequeño o poco nítido: acerca el celular o usa 4K");
+  if (promC.voz !== undefined && promC.voz < 0.45) avisos.push("hubo poca voz en las respuestas: las señales de voz pesan poco");
+  const vals = Object.values(promC);
+  const calidad = vals.length ? `<table>${Object.entries(promC).map(([s, v]) => `<tr><td>${nombres[s]}</td><td class="n">${calidadTexto(v)} (${Math.round(v * 100)}%)</td></tr>`).join("")}</table>${avisos.length ? `<div class="sub">Avisos: ${e(avisos.join("; "))}.</div>` : ""}<p>Calidad general: <b>${calidadTexto(vals.reduce((a, b) => a + b, 0) / vals.length)}</b>.</p>` : "<p>Sin datos de calidad.</p>";
+  return `<h2>Resultados</h2><div class="tarjeta"><h3>1 · Reacción</h3>${reaccion}</div><div class="tarjeta"><h3>2 · Reconocimiento</h3>${recon}</div><div class="tarjeta"><h3>3 · Calidad de la medición</h3>${calidad}</div>`;
+}
+
+function seccionGestos(d) {
+  const eventos = d.gestos || [];
+  if (!eventos.length) return "";
+  const periodos = {};
+  if (d.baseInicio !== null && d.baseInicio !== undefined) periodos.reposo = [[d.baseInicio, d.baseInicio + DURACION_BASE]];
+  periodos.preguntas = d.marcas.map(m => [m.t - 0.5, m.t + ESPERA_MARCA]);
+  const f = (x, dec = 1) => x === null || x === undefined ? "" : x.toFixed(dec);
+  const filas = tablaGestos(eventos, periodos).map(r => { const a = r.periodos.reposo, p = r.periodos.preguntas;
+    return `<tr><td><b>${r.au}</b> ${e(r.nombre)}</td><td class="n">${f(a?.porMin)}</td><td class="n">${f(p?.porMin)}</td><td class="n">${f(p?.duracion, 2)}</td><td class="n">${r.pareada ? f(p?.asimetria, 2) : "—"}</td><td class="n">${p?.micro || 0}</td></tr>`; }).join("");
+  const porPregunta = d.marcas.filter(m => m.gestos?.length).map(m => `<tr><td class="n">${m.n}</td><td>${e(m.texto.slice(0, 50))}</td><td>${m.gestos.map(g => `<span class="tag c">${e(g)}</span>`).join("")}</td></tr>`).join("");
+  return `<h2>Gestos faciales (unidades de acción)</h2><div class="sub">Unidades de acción del sistema FACS medidas con los 52 movimientos del modelo: cuántas veces por minuto en reposo y en preguntas, duración y asimetría (0 = igual en ambos lados; las expresiones fingidas suelen ser más asimétricas). «Micro» = menos de medio segundo.</div>
+    <div class="tarjeta"><table><tr><th>Unidad</th><th>Reposo /min</th><th>Preguntas /min</th><th>Dur. (s)</th><th>Asim.</th><th>Micro</th></tr>${filas}</table></div>
+    ${porPregunta ? `<div class="tarjeta"><table><tr><th>#</th><th>Pregunta</th><th>Gestos</th></tr>${porPregunta}</table></div>` : ""}`;
+}
+
 export function cuerpoReporte(d) {
   const listas = d.marcas.filter(m => m.indice !== null);
   const altas = listas.filter(m => m.indice >= 78).length;
   const mayor = listas.reduce((a, b) => (!a || b.indice > a.indice ? b : a), null);
   const fecha = new Date(d.fecha).toLocaleString("es-MX", { dateStyle: "medium", timeStyle: "short" });
-  const citHtml = resultadosCit(listas).map(({ grupo, orden, clave, separacion, rondas }) => {
+  const cit = resultadosCit(listas);
+  const citHtml = cit.map(({ grupo, orden, clave, confianza, rondas }) => {
     const top = orden[0];
     let txt = clave ? (top.opcion === clave.opcion ? "La opción clave tuvo la mayor reacción." : `La mayor reacción fue para «${e(top.opcion)}», no para la opción clave.`)
       : `Mayor reacción: «${e(top.opcion)}».`;
-    txt += separacion >= 1 ? " Destaca con claridad sobre las demás." : separacion >= 0.5 ? " Destaca poco sobre la siguiente." : " Casi empatada con las demás: no hay una opción clara.";
+    txt += confianza === "alta" ? " Destaca con claridad sobre las demás (confianza alta)." : confianza === "media" ? " Destaca poco sobre la siguiente (confianza media)." : " Casi empatada con las demás: sin evidencia suficiente.";
     return `<div class="tarjeta cit"><h3>${e(grupo)}</h3><ul>${orden.map(m => `<li><span class="op">${e(m.opcion)}${m.clave ? " (clave)" : ""}${m.rt ? ` · ${m.rt.toFixed(2)} s` : ""}</span>
       <div class="barra"><i style="left:0;width:${Math.round(m.indice)}%;background:#4CC9F0"></i></div><b>${Math.round(m.indice)}</b></li>`).join("")}</ul>
       <div class="sub">${txt} ${rondas > 1 ? `Promedio de ${rondas} rondas. ` : ""}Al azar se acertaría 1 de cada ${orden.length} veces.</div></div>`;
@@ -115,15 +163,18 @@ export function cuerpoReporte(d) {
       <div><span>Mayor reacción</span><b>${mayor ? Math.round(mayor.indice) : "—"}</b><small>${mayor ? e("#" + mayor.n + " " + mayor.texto) : ""}</small></div>
       <div><span>Conductas</span><b>${(d.eventos || []).length}</b></div></div>
     <div class="aviso"><b>Cómo leer esto.</b> El índice va de 0 a 100 y 50 es «igual que en tu reposo». Mide activación y esfuerzo mental,
-      no mentiras: nervios, sorpresa o una pregunta incómoda también lo suben.</div>
+      no mentiras: nervios, sorpresa o una pregunta incómoda también lo suben. Los resultados van en tres partes separadas.</div>
+    ${seccionResultados(d, listas, cit)}
     <h2>Preguntas</h2>${d.marcas.length ? d.marcas.map(tarjetaPregunta).join("") : `<div class="sub">No se marcaron preguntas.</div>`}
     ${citHtml ? `<h2>Test de Información Oculta</h2>${citHtml}` : ""}
+    ${seccionGestos(d)}
     ${conducta.length ? `<h2>Conducta observada</h2><div class="tarjeta"><table><tr><th>Conducta</th><th>Reposo</th><th>Preguntas</th><th>Fuera</th></tr>
       ${conducta.map(([k, c]) => `<tr><td>${e(k)}</td><td class="n">${c[0]}</td><td class="n">${c[1]}</td><td class="n">${c[2]}</td></tr>`).join("")}</table></div>` : ""}
     <h2>Señales</h2><div class="sub">La franja azul es la calibración; las líneas punteadas son las preguntas.</div>
-    ${grafica(d.filas, "pupila", "Pupila (mm)", "mm", "#4CC9F0", d)}${grafica(d.filas, "pulso", "Pulso estimado por la piel", "lpm", "#FF5D73", d)}
+    ${grafica(d.filas, "pupila", "Pupila (mm, estimada con el iris de 11.7 mm)", "mm", "#4CC9F0", d)}${grafica(d.filas, "pulso", "Pulso estimado por la piel", "lpm", "#FF5D73", d)}
     ${grafica(d.filas, "tono", "Tono de voz", "Hz", "#A78BFA", d)}${grafica(d.filas, "tension", "Tensión facial", "%", "#F4B740", d)}
     ${grafica(d.filas, "respiracion", "Respiración (por los hombros)", "resp/min", "#A78BFA", d)}${grafica(d.filas, "boca", "Movimiento de la boca", "%", "#4CC9F0", d)}
+    ${grafica(d.filas, "asimetria", "Asimetría facial", "0-1", "#F4B740", d)}${grafica(d.filas, "hnr", "Voz: armónicos / ruido", "dB", "#A78BFA", d)}
     ${d.baseVerbal?.texto ? `<h2>Lo que dijo en la calibración</h2><blockquote>${e(d.baseVerbal.texto)}</blockquote>` : ""}
   </div>`;
 }

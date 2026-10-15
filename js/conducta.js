@@ -92,7 +92,7 @@ const GESTOS = [
   ["Entrecerró los ojos", ["eyeSquintLeft", "eyeSquintRight"], 0.50],
   ["Arrugó la nariz", ["noseSneerLeft", "noseSneerRight"], 0.40],
 ];
-const CATEGORIAS = ["mirada", "toque", "cabeza", "gesto", "micro"];
+const CATEGORIAS = ["mirada", "toque", "cabeza", "gesto", "micro", "au"];
 
 export function contarVaivenes(valores, amplitud = 4) {
   let cambios = 0, sentido = 0, pico = valores[0];
@@ -105,7 +105,8 @@ export function contarVaivenes(valores, amplitud = 4) {
 }
 
 export class DetectorConducta {
-  constructor() {
+  constructor(conGestos = true) {
+    this.conGestos = conGestos;       // false: los gestos los reporta gestos.js (unidades de accion)
     this.eventos = [];
     this.series = Object.fromEntries(CATEGORIAS.map(c => [c, new Serie(900)]));
     this.miradaActual = "al centro";
@@ -133,8 +134,9 @@ export class DetectorConducta {
     this.mirada(t, r, P);
     this.toques(t, r, P, manos);
     this.cabeza(t, r);
-    this.gestos(t, r.gestos);
+    if (this.conGestos) this.gestos(t, r.gestos);
   }
+  eventoExterno(t, categoria, texto, duracion = null) { this.evento(t, categoria, texto, duracion); }
   mirada(t, r, P) {
     if (r.miradaH === null) return;
     const medio = [(P(33)[0] + P(263)[0]) / 2, (P(33)[1] + P(263)[1]) / 2];

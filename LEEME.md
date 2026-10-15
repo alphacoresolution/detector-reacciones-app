@@ -66,6 +66,12 @@ Usa los mismos métodos de la versión de computadora:
 - **Ritmo del habla:** arranques de voz por segundo, pausas y rango del tono: lo que más cambia con el estrés.
 - **Respiración:** por los hombros (cámara) y, con audífonos con micrófono, por el sonido de las inhalaciones.
 - **Malla facial:** sobre la boca o toda la cara, coloreada según el movimiento de la expresión.
+- **Gestos precisos:** los 52 gestos se traducen a unidades de acción (FACS) con intensidad por lado,
+  asimetría izquierda/derecha, duración y «micro» (menos de medio segundo). Entran al índice la asimetría
+  facial y la supresión de la boca (labios apretados o escondidos), y el reporte trae la tabla por unidad.
+- **Voz afinada:** jitter, shimmer, relación armónicos/ruido (HNR) y brillo, además del tono y el ritmo.
+- **Tres resultados separados** al inicio del reporte: reacción, reconocimiento (con confianza o «sin
+  evidencia suficiente») y calidad de la medición.
 - **Rondas del juego:** cada grupo del objeto escondido se pregunta 2 o 3 veces en orden distinto.
 - **Pupila de cerca:** en la última ronda de cada grupo, la app pide acercar el celular hasta que el
   marco se ponga verde (unos 25–30 cm: el iris se ve 1.7 a 2.6 veces más grande que en la calibración),
@@ -83,6 +89,8 @@ queda con el más rápido.
 - **Transcripción menos detallada:** el reconocimiento de voz del iPhone no da el tiempo exacto de
   cada palabra, y puede no funcionar mientras otra app usa el micrófono.
 - **Sin análisis con Claude:** no se envía nada fuera del teléfono.
+- **Sin polígrafo:** el navegador no puede leer puertos serie ni Bluetooth. Para conductancia de la piel,
+  cinturón de respiración o un polígrafo profesional (archivos NCCA) usa la versión de computadora.
 
 ## Archivos
 
